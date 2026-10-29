@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tesla Climate Concierge — Live Demo</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 760px;
+         margin: 2em auto; padding: 0 1em; color: #222; line-height: 1.5; }
+  .badge { display: inline-block; background: #f59e0b; color: #fff;
+           font-weight: 700; font-size: 0.8em; padding: 0.2em 0.6em;
+           border-radius: 4px; letter-spacing: 0.05em; }
+  input, select { font-size: 1em; padding: 0.5em; width: 100%;
+                  box-sizing: border-box; margin: 0.3em 0 1em; }
+  button { font-size: 1em; padding: 0.6em 1.4em; cursor: pointer; }
+  pre { background: #f4f4f4; padding: 1em; overflow-x: auto; border-radius: 6px; }
+  .timeline { border-left: 3px solid #3b82f6; padding-left: 1em; margin: 1em 0; }
+  .timeline div { margin: 0.5em 0; }
+  .note { color: #555; font-size: 0.9em; }
+  .err { color: #b91c1c; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>Tesla Climate Concierge</h1>
+<p><span class="badge">DEMO DATA</span> — This page runs the app's real parsing
+and planning logic in your browser on pretend data. No real car, backend, or
+Tesla account is connected.</p>
+<p>Type a calendar event in plain words, pick the weather, and see the parsed
+event plus the climate plan.</p>
+
+<label>Calendar event (try: <em>early flight!! leave 5ish</em>)</label>
+<input id="event" value="early flight!! leave 5ish to LAX">
+<label>Outside temperature now (°F)</label>
+<input id="current" type="number" value="52">
+<label>Forecast temperature at departure (°F)</label>
+<input id="forecast" type="number" value="48">
+<button onclick="run()">Plan my climate</button>
+
+<h2>Parsed event</h2>
+<pre id="parsed">(press the button)</pre>
+<h2>Climate plan timeline</h2>
+<div class="timeline" id="timeline"></div>
+<p class="note" id="notes"></p>
+
+<script>
+const WEEKDAYS = {sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6};
+const KNOWN = ["lax","airport","work","office","gym","school","church","beach",
+  "big bear","mammoth","vegas","san diego","downtown","home","doctor","dentist"];
+const TEMP_WORDS = {warm:72,cozy:72,toasty:72,hot:74,cold:74,freezing:74,chilly:68,cool:68,mild:70};
+const EARLY = ["early","morning","flight","airport","sunrise","dawn"];
+const EVENING = ["evening","dinner","night","sunset","late"];
+
+function fmt12(d){let h=d.getHours(),m=String(d.getMinutes()).padStart(2,"0");
+  const ap=h>=12?"PM":"AM"; h=h%12||12; return h+":"+m+" "+ap;}
+
+function parseEvent(text, now){
+  const low = text.toLowerCase();
+  let day = new Date(now), dayExplicit = false;
+  if (/\btomorrow\b|\btmw\b/.test(low)) { day.setDate(day.getDate()+1); dayExplicit = true; }
+  else if (/\byesterday\b/.test(low)) { day.setDate(day.getDate()-1); dayExplicit = true; }
+  else if (/\btoday\b|\btonight\b/.test(low)) { dayExplicit = true; }
+  else {
+    for (const [name,num] of Object.entries(WEEKDAYS)) {
+      if (new RegExp("\\b"+name+"\\b").test(low)) {
+        let delta = (num - now.getDay() + 7) % 7 || 7;
+        day.setDate(day.getDate()+delta); dayExplicit = true; break;
+      }
+    }
+  }
+  let clock = null, clockExplicit = false, clockNote = "";
+  let m = text.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (m) {
+    let h = +m[1], min = +(m[2]||0);
+    if (m[3].toLowerCase()==="pm" && h!==12) h+=12;
+    if (m[3].toLowerCase()==="am" && h===12) h=0;
+    clock = [h,min]; clockExplicit = true;
+  } else if ((m = text.match(/\b(\d{1,2})(?::(\d{2}))?\s*ish\b/i))) {
+    let h = +m[1], min = +(m[2]||0);
+    if (EARLY.some(w=>low.includes(w))) {}
+    else if (EVENING.some(w=>low.includes(w))) { if (h!==12) h+=12; }
+    else if (h>=1 && h<=6) h+=12;
+    clock = [h,min]; clockExplicit = true; clockNote = "time read as approximate ('ish')";
+  } else if (/\bnoon\b/.test(low)) { clock=[12,0]; clockExplicit=true; }
+  else if (/\bmidnight\b/.test(low)) { clock=[0,0]; clockExplicit=true; }
+  else if (EARLY.some(w=>low.includes(w))) {
+    clock=[6,0]; clockNote="no time given — 'early' events default to 6:00 AM";
+  }
+  let destination = null;
+  for (const p of KNOWN) {
+    const mm = text.match(new RegExp("\\b"+p+"\\b","i"));
+    if (mm) { destination = mm[0]; break; }
+  }
+  if (!destination) {
+    const mm = text.match(/\b(?:to|for|at)\s+([A-Za-z][A-Za-z' ]{1,40}?)(?=\s+(?:at|leave|leaving|depart|by|for|,)|$)/);
+    if (mm) destination = mm[1].trim();
+  }
+  let temp = 70, tempExplicit = false, tempNote = "no temperature given — default 70°F";
+  m = text.match(/\b(\d{2,3})\s*(?:°|degrees?|deg)\b/i) ||
+      text.match(/\b(?:temp|temperature|set(?: it)?(?: to)?)\s+(\d{2,3})\b/i);
+  if (m && +m[1]>=50 && +m[1]<=85) { temp=+m[1]; tempExplicit=true; tempNote=""; }
+  else {
+    for (const [w,t] of Object.entries(TEMP_WORDS)) {
+      if (new RegExp("\\b"+w+"\\b").test(low)) { temp=t; tempNote=`no degrees given — '${w}' mapped to ${t}°F`; break; }
+    }
+  }
+  const guessed = [], notes = [];
+  let departure = null;
+  if (!clock) { guessed.push("departure_time"); notes.push("No departure time found in the event text."); }
+  else {
+    departure = new Date(day); departure.setHours(clock[0], clock[1], 0, 0);
+    if (!clockExplicit) { guessed.push("departure_time"); notes.push(clockNote); }
+    else if (clockNote) notes.push(clockNote);
+    if (!dayExplicit && departure <= now) {
+      departure.setDate(departure.getDate()+1);
+      notes.push("That time already passed today, so I read it as tomorrow.");
+    }
+  }
+  if (!tempExplicit) { guessed.push("temp_target_f"); notes.push(tempNote); }
+  if (!destination) { guessed.push("destination"); notes.push("No destination found."); }
+  let conf = Math.max(0.1, 1 - 0.25*guessed.includes("departure_time")
+    - 0.15*guessed.includes("temp_target_f") - 0.10*guessed.includes("destination"));
+  return {raw_text:text, departure_time: departure?departure.toISOString():null,
+    departure_label: departure?fmt12(departure):null, destination,
+    temp_target_f:temp, confidence:+conf.toFixed(2), guessed, notes};
+}
+
+function plan(parsed, current, forecast, now){
+  if (!parsed.departure_time) return {error:"I couldn't find a departure time in that event, so I can't plan the climate yet. Try adding a time like 'leave 5:30pm' and ask again."};
+  const dep = new Date(parsed.departure_time);
+  if (dep <= now) return {error:`That departure (${fmt12(dep)}) is already in the past, so there's nothing to precondition for. Add a future time — for example 'tomorrow 7am' — and I'll plan it.`};
+  const outside = forecast!==null&&forecast!=="" ? +forecast : +current;
+  let lead = 15;
+  if (Math.abs(parsed.temp_target_f - outside) >= 25) lead += 10;
+  if (outside < 32 || outside > 95) lead += 10;
+  if (outside <= 0 || outside >= 110) lead += 30;
+  lead = Math.min(lead, 60);
+  const start = new Date(dep.getTime() - lead*60000);
+  const actions = [{at:fmt12(start), desc:`Start preconditioning to ${parsed.temp_target_f}°F`}];
+  if (outside < 50) actions.push({at:fmt12(start), desc:"Turn on the driver's seat heater (it's cold outside)"});
+  actions.push({at:"after you return", desc:"Re-arm Cabin Overheat Protection after the trip"});
+  const destTxt = parsed.destination ? ` to ${parsed.destination}` : "";
+  const summary = `For your ${dep.toLocaleDateString(undefined,{weekday:"long"})} departure${destTxt} at ${fmt12(dep)}, I'll start the climate at ${fmt12(start)} (${lead} minutes early) and hold ${parsed.temp_target_f}°F.` +
+    (outside < 50 ? " Seat heater comes on too, since it's cold outside." : "") +
+    " Cabin Overheat Protection re-arms when you're back.";
+  return {lead, start, actions, summary};
+}
+
+function run(){
+  const now = new Date();
+  const parsed = parseEvent(document.getElementById("event").value, now);
+  document.getElementById("parsed").textContent = JSON.stringify(parsed, null, 2);
+  const p = plan(parsed, document.getElementById("current").value,
+                 document.getElementById("forecast").value, now);
+  const tl = document.getElementById("timeline");
+  if (p.error) { tl.innerHTML = `<div class="err">${p.error}</div>`; }
+  else {
+    tl.innerHTML = p.actions.map(a=>`<div><b>${a.at}:</b> ${a.desc}</div>`).join("")
+      + `<div><b>${parsed.departure_label}:</b> You leave — cabin already at ${parsed.temp_target_f}°F</div>`;
+  }
+  document.getElementById("notes").textContent =
+    (p.summary || "") + (parsed.notes.length ? " Notes: " + parsed.notes.join(" ") : "");
+}
+run();
+</script>
+</body>
+</html>

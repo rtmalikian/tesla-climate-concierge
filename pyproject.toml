@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tesla-climate-concierge"
+version = "0.1.0"
+description = "Your Tesla's climate, planned from your calendar in plain words — free-text events ('early flight!! leave 5ish') parsed into departure times and cabin targets, with weather-aware preconditioning and Cabin Overheat Protection re-arm, over the Tesla Fleet API"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Raphael Malikian", email = "rtmalikian@gmail.com" }]
+keywords = ["tesla", "fleet-api", "openai-compatible", "llm", "ai", "climate", "preconditioning", "cabin-overheat-protection", "calendar", "ollama", "ev", "model-3", "model-y", "model-s", "model-x", "cybertruck"]
+dependencies = [
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Home Automation",
+]
+
+[project.scripts]
+tcconcierge = "tesla_climate_concierge.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/rtmalikian/tesla-climate-concierge"
+Issues = "https://github.com/rtmalikian/tesla-climate-concierge/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
